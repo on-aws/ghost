@@ -1,0 +1,277 @@
+Description: >-
+  AWS EC2 AutoScaling Group for Ghost. **WARNING** This template creates AWS EC2 SPOT instances.
+  You will be billed for the AWS resources used if you create a stack from this template.
+
+Parameters:
+  Tag:
+    Description: We tag all AWS resources for your convinience.
+    Type: String
+    Default: ghost
+
+  DomainName:
+    Description: Domain name for your Ghost deployment
+    Type: String
+
+  HostedZoneId:
+    Description: AWS Route53 HostedZone Id
+    Type: String
+
+  SslCert:
+    Description: SSL certificate ARN for your domain
+    Type: String
+
+  InstanceType:
+    Description: EC2 Instance Type
+    Type: String
+    AllowedValues:
+      - t3a.micro
+      - t3a.small
+      - t3a.medium
+    Default: t3a.micro
+
+  ClusterSize:
+    Description: Use default (1) for test outside of a production.
+    Type: Number
+    Default: 1
+
+  VPC:
+    Description: Choose existing VPC
+    Type: AWS::EC2::VPC::Id
+
+  PrivateSubnets:
+    Description: Choose existing private subnets
+    Type: List<AWS::EC2::Subnet::Id>
+
+  PublicSubnets:
+    Description: Choose existing public subnets
+    Type: List<AWS::EC2::Subnet::Id>
+
+  SecurityGroup:
+    Description: Select the Security Group
+    Type: AWS::EC2::SecurityGroup::Id
+
+  AMI:
+    Description: Amazon Linux 2
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-ebs
+
+  DBSecretId:
+    Description: Specifies the secret-id (ARN) containing the database information
+    Type: String
+
+Resources:
+  HttpTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 2368
+      Protocol: HTTP
+      TargetType: instance
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref PrivateSubnets
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MinSize: !Ref ClusterSize
+      MaxSize: !Ref ClusterSize
+      DesiredCapacity: !Ref ClusterSize
+      TargetGroupARNs:
+        - !Ref HttpTargetGroup
+      Tags:
+        - Key: App
+          Value: !Ref Tag
+          PropagateAtLaunch: true
+        - Key: Name
+          Value: !Ref Tag
+          PropagateAtLaunch: true
+    #CreationPolicy:
+    #  ResourceSignal:
+    #    Count: !Ref ClusterSize
+    #    Timeout: PT15M
+    #UpdatePolicy:
+    #  AutoScalingRollingUpdate:
+    #    PauseTime: PT15M
+    #    SuspendProcesses:
+    #      - HealthCheck
+    #      - ReplaceUnhealthy
+    #      - AZRebalance
+    #      - AlarmNotification
+    #      - ScheduledActions
+    #    WaitOnResourceSignals: true
+
+  # UserData
+  # Installs CloudForamtion helper scripts
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-helper-scripts-reference.html
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      SpotPrice: 0.01
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #cloud-config
+          package_update: true
+          packages:
+            - aws-cfn-bootstrap
+            - jq
+            - mysql
+          users:
+            - default
+            - name: velaskec
+              sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+              groups: wheel
+          runcmd:
+            - /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource LaunchConfiguration --region ${AWS::Region}
+            - /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AutoScalingGroup --region ${AWS::Region}
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackName}
+                region=${AWS::Region}
+              mode: '000400'
+              owner: root
+              group: root
+          commands:
+            # Install Amazon RDS SSL/TLS CA
+            # Documentation: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
+            # vim /etc/pki/tls/certs/ca-bundle.crt
+            01_install_rds_ca:
+              command: >
+                update-ca-trust force-enable &&
+                sudo curl https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem --output /etc/pki/ca-trust/source/anchors/rds-combined-ca-bundle.pem &&
+                sudo update-ca-trust extract
+            02_install_nodejs:
+              command: curl -sL https://rpm.nodesource.com/setup_12.x | bash - && yum install -y nodejs
+            03_install_ghost_cli:
+              command: npm install ghost-cli@latest -g
+            04_create_ghost_user:
+              command: useradd --system --user-group ghost
+            05_install_ghost:
+              command: !Sub >-
+                mkdir -p /var/www/ghost && chown velaskec:velaskec /var/www/ghost &&
+                chmod 775 /var/www/ghost && runuser -l velaskec -c 'DBHOST=$(aws secretsmanager get-secret-value --secret-id ${DBSecretId} --query SecretString --region ${AWS::Region} --output text | jq -r .host) &&
+                DBUSER=$(aws secretsmanager get-secret-value --secret-id ${DBSecretId} --query SecretString --region ${AWS::Region} --output text | jq -r .username) &&
+                DBPASS=$(aws secretsmanager get-secret-value --secret-id ${DBSecretId} --query SecretString --region ${AWS::Region} --output text | jq -r .password) &&
+                DBENGINE=$(aws secretsmanager get-secret-value --secret-id ${DBSecretId} --query SecretString --region ${AWS::Region} --output text | jq -r .engine) &&
+                cd /var/www/ghost &&
+                mysql -h$DBHOST -p$DBPASS -u$DBUSER  -e '\''CREATE DATABASE IF NOT EXISTS ghost_prod;'\'' &&
+                ghost install --url https://${DomainName} -ip 0.0.0.0 --db $DBENGINE --dbhost $DBHOST --dbname ghost_prod --dbuser $DBUSER --dbpass $DBPASS --auto --no-stack --no-start'
+            06_configure_ghost:
+              command: >-
+                cd /var/www/ghost &&
+                ghost config set server.host 0.0.0.0 &&
+                cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
+              #cat config.production.json | jq '.database.connection += {ssl: "Amazon RDS"}' > config.production.json2; mv -f config.production.json{2,}
+            07_start_ghost:
+              command: !Join
+                - ''
+                - - domain=
+                  - !Ref DomainName
+                  - ' && systemctl start ghost_${domain//./-}'
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Action": "sts:AssumeRole",
+                "Effect": "Allow",
+                "Principal": {
+                    "Service": "ec2.amazonaws.com"
+                }
+            }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref InstanceRole
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Subnets: !Ref PublicSubnets
+      SecurityGroups:
+        - !Ref SecurityGroup
+      Tags:
+        - Key: App
+          Value: !Ref Tag
+        - Key: Name
+          Value: !Ref Tag
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Comment: DNS name for Ghost.
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !Sub
+          - dualstack.${DNSName} # https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-alias.html#rrsets-values-alias-alias-target
+          -
+            DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget-1.html#cfn-route53-aliastarget-hostedzoneid
+
+  DnsRecordWww:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Comment: DNS name for Ghost.
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub www.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !Sub
+          - dualstack.${DNSName} # https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-values-alias.html#rrsets-values-alias-alias-target
+          -
+            DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget-1.html#cfn-route53-aliastarget-hostedzoneid
+
+  LoadBalancerListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        -  CertificateArn: !Ref SslCert
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref HttpTargetGroup
+
+  # redirect http->https
+  LoadBalancerListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Port: 443
+            Protocol: HTTPS
+            StatusCode: HTTP_301

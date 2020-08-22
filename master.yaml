@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Description
+
+Parameters:
+  Tag:
+    Description: We tag all AWS resources for your convinience.
+    Type: String
+    Default: ghost
+
+  DomainName:
+    Description: Domain name for your Ghost deployment
+    Type: String
+
+  HostedZoneId:
+    Description: AWS Route53 HostedZone Id
+    Type: String
+
+  TemplatesBucket:
+    Description: Specify build-cleaved-pipelines-templats S3 Bucket
+    Type: String
+    Default: on-aws-us-east-1-master
+
+Resources:
+  SslCert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub '*.${DomainName}'
+      ValidationMethod: DNS
+      Tags:
+        - Key: App
+          Value: !Ref Tag
+        - Key: Name
+          Value: !Ref Tag
+
+  # ####################
+  # INFRASTRUCTURE
+  # ####################
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatesBucket}/vpc/template.yaml
+      Parameters:
+        Tag: ghost
+
+  DATABASE:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatesBucket}/aurora/template.yaml
+      Parameters:
+        Tag: ghost
+        VPC: !GetAtt VPC.Outputs.VPC
+        PrivateSubnets: !GetAtt VPC.Outputs.PrivateSubnets
+        ComputeSecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+
+  GHOST:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatesBucket}/ghost/cluster.yaml
+      Parameters:
+        Tag: ghost
+        VPC: !GetAtt VPC.Outputs.VPC
+        PrivateSubnets: !GetAtt VPC.Outputs.PrivateSubnets
+        PublicSubnets: !GetAtt VPC.Outputs.PublicSubnets
+        SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
+        DBSecretId: !GetAtt DATABASE.Outputs.DBSecretId
+        DomainName: !Ref DomainName
+        HostedZoneId: !Ref HostedZoneId
+        SslCert: !Ref SslCert
