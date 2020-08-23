@@ -145,6 +145,11 @@ Resources:
               mode: '000400'
               owner: root
               group: root
+            /tmp/on-aws/index.js:
+              source: https://raw.githubusercontent.com/on-aws/ghost-storage/master/src/index.js
+              mode: '000775'
+              owner: velaskec
+              group: velaskec
           commands:
             # Install Amazon RDS SSL/TLS CA
             # Documentation: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
@@ -174,6 +179,7 @@ Resources:
               command: >-
                 cd /var/www/ghost &&
                 ghost config set server.host 0.0.0.0 &&
+                mv /tmp/on-aws/ current/content/adapters/storage/ &&
                 cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
               #cat config.production.json | jq '.database.connection += {ssl: "Amazon RDS"}' > config.production.json2; mv -f config.production.json{2,}
             07_start_ghost:
