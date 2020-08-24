@@ -174,7 +174,6 @@ Resources:
               command: >-
                 cd /var/www/ghost &&
                 ghost config set server.host 0.0.0.0 &&
-                mv /tmp/on-aws/ current/content/adapters/storage/ &&
                 cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
               #cat config.production.json | jq '.database.connection += {ssl: "Amazon RDS"}' > config.production.json2; mv -f config.production.json{2,}
             07_install_ghost_storage: >-
