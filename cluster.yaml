@@ -145,11 +145,6 @@ Resources:
               mode: '000400'
               owner: root
               group: root
-            /tmp/on-aws/index.js:
-              source: https://raw.githubusercontent.com/on-aws/ghost-storage/master/src/index.js
-              mode: '000775'
-              owner: velaskec
-              group: velaskec
           commands:
             # Install Amazon RDS SSL/TLS CA
             # Documentation: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html
