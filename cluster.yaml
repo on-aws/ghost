@@ -176,12 +176,13 @@ Resources:
                 ghost config set server.host 0.0.0.0 &&
                 cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
               #cat config.production.json | jq '.database.connection += {ssl: "Amazon RDS"}' > config.production.json2; mv -f config.production.json{2,}
-            07_install_ghost_storage: >-
-              cd /var/www/ghost &&
-              npm install on-aws-ghost-storage &&
-              mkdir -p content/adapters/storage &&
-              sudo cp -vR node_modules/on-aws-ghost-storage content/adapters/storage/on-aws-ghost-storage &&
-              chown -R velaskec:velaskec ./content
+            07_install_ghost_storage:
+              command: >-
+                cd /var/www/ghost &&
+                npm install on-aws-ghost-storage &&
+                mkdir -p content/adapters/storage &&
+                sudo cp -vR node_modules/on-aws-ghost-storage content/adapters/storage/on-aws-ghost-storage &&
+                chown -R velaskec:velaskec ./content
             08_start_ghost:
               command: !Join
                 - ''
