@@ -175,7 +175,10 @@ Resources:
                 cd /var/www/ghost &&
                 ghost config set server.host 0.0.0.0 &&
                 cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
-              #cat config.production.json | jq '.database.connection += {ssl: "Amazon RDS"}' > config.production.json2; mv -f config.production.json{2,}
+                cat config.production.json | jq --argjson '{"active": "on-aws-ghost-storage", "on-aws-ghost-storage": {}}'  '. + {storage: $json}' > config.production.json2; mv -f config.production.json{2,}
+                cat config.production.json | jq '.storage.on-aws-ghost-storage += {bucketName: "velaskec.com"}' > config.production.json2; mv -f config.production.json{2,}
+                cat config.production.json | jq '.storage.on-aws-ghost-storage += {keyPrefix: "images"}' > config.production.json2; mv -f config.production.json{2,}
+                cat config.production.json | jq '.storage.on-aws-ghost-storage += {distributionDomainName: "https://images.velaskec.ca"}' > config.production.json2; mv -f config.production.json{2,}
             07_install_ghost_storage:
               command: >-
                 cd /var/www/ghost &&
