@@ -7,10 +7,6 @@ Parameters:
     Type: String
     Default: ghost
 
-  DomainName:
-    Description: Domain name for your Ghost deployment
-    Type: String
-
   HostedZoneId:
     Description: AWS Route53 HostedZone Id
     Type: String
@@ -21,18 +17,93 @@ Parameters:
     Default: on-aws-us-east-1-master
 
 Resources:
+  # ####################
+  # CFN CUSTOM RESOURCES
+  # ####################
+  ROUTE53:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatesBucket}/custom/route53/template.yaml
+      Parameters:
+        Tag: !Ref Tag
+
+  GetHostedZone:
+    Type: Custom::CustomResource
+    Properties:
+      ServiceToken: !GetAtt ROUTE53.Outputs.ServiceToken
+      Id: !Ref HostedZoneId
+
+  # ####################
+  # Ssl Certificate
+  # ####################
   SslCert:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      DomainName: !Ref DomainName
+      DomainName: !GetAtt GetHostedZone.Name
       SubjectAlternativeNames:
-        - !Sub '*.${DomainName}'
+        - !Sub
+          - '*.${Name}'
+          -
+            Name: !GetAtt GetHostedZone.Name
       ValidationMethod: DNS
       Tags:
         - Key: App
           Value: !Ref Tag
         - Key: Name
           Value: !Ref Tag
+
+  # #################################
+  # CDN for your publication's images
+  # #################################
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub
+          - https://images.${Name}
+          -
+            Name: !GetAtt GetHostedZone.Name
+        Aliases:
+          - !Sub
+            - images.${Name}
+            -
+              Name: !GetAtt GetHostedZone.Name
+        DefaultCacheBehavior:
+          TargetOriginId: images
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2
+        Origins:
+          - Id: images
+            DomainName: velaskec.com.s3.amazonaws.com
+            OriginPath: images
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          AcmCertificateArn: !Ref SslCert
+          MinimumProtocolVersion: TLSv1.2_2018
+          SslSupportMethod: sni-only
+        Tags:
+          - Key: App
+            Value: !Ref Tag
+          - Key: Name
+            Value: !Ref Tag
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub
+        - images.${Name}
+        -
+          Name: !GetAtt GetHostedZone.Name
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # Specify Z2FDTNDATAQYW2. This is always the hosted zone ID when you create an alias record that routes traffic to a CloudFront distribution.
 
   # ####################
   # INFRASTRUCTURE
@@ -65,6 +136,6 @@ Resources:
         PublicSubnets: !GetAtt VPC.Outputs.PublicSubnets
         SecurityGroup: !GetAtt VPC.Outputs.SecurityGroup
         DBSecretId: !GetAtt DATABASE.Outputs.DBSecretId
-        DomainName: !Ref DomainName
+        DomainName: !GetAtt GetHostedZone.Name
         HostedZoneId: !Ref HostedZoneId
         SslCert: !Ref SslCert
