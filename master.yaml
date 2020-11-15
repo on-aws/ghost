@@ -185,3 +185,4 @@ Resources:
         DomainName: !GetAtt GetHostedZone.Name
         HostedZoneId: !Ref HostedZoneId
         SslCert: !Ref SslCert
+        BucketName: !Ref OriginBucket

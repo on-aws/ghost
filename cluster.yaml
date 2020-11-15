@@ -59,6 +59,10 @@ Parameters:
     Description: Specifies the secret-id (ARN) containing the database information
     Type: String
 
+  BucketName:
+    Description: Amazon S3 Bucket to store your media files
+    Type: String
+
 Resources:
   HttpTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -170,22 +174,20 @@ Resources:
                 cd /var/www/ghost &&
                 mysql -h$DBHOST -p$DBPASS -u$DBUSER  -e '\''CREATE DATABASE IF NOT EXISTS ghost_prod;'\'' &&
                 ghost install --url https://${DomainName} -ip 0.0.0.0 --db $DBENGINE --dbhost $DBHOST --dbname ghost_prod --dbuser $DBUSER --dbpass $DBPASS --auto --no-stack --no-start'
-            06_configure_ghost:
-              command: >-
-                cd /var/www/ghost &&
-                ghost config set server.host 0.0.0.0 &&
-                cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,}
-                cat config.production.json | jq --argjson '{"active": "on-aws-ghost-storage", "on-aws-ghost-storage": {}}'  '. + {storage: $json}' > config.production.json2; mv -f config.production.json{2,}
-                cat config.production.json | jq '.storage.on-aws-ghost-storage += {bucketName: "velaskec.com"}' > config.production.json2; mv -f config.production.json{2,}
-                cat config.production.json | jq '.storage.on-aws-ghost-storage += {keyPrefix: "images"}' > config.production.json2; mv -f config.production.json{2,}
-                cat config.production.json | jq '.storage.on-aws-ghost-storage += {distributionDomainName: "https://images.velaskec.ca"}' > config.production.json2; mv -f config.production.json{2,}
-            07_install_ghost_storage:
+            06_install_ghost_storage:
               command: >-
                 cd /var/www/ghost &&
                 npm install on-aws-ghost-storage &&
                 mkdir -p content/adapters/storage &&
                 sudo cp -vR node_modules/on-aws-ghost-storage content/adapters/storage/on-aws-ghost-storage &&
                 chown -R ghost:ghost ./content
+            07_configure_ghost:
+              command: !Sub >-
+                cd /var/www/ghost &&
+                ghost config set server.host 0.0.0.0 &&
+                cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,} &&
+                storage_config='{ "active": "on-aws-ghost-storage", "on-aws-ghost-storage": { "bucketName": "${BucketName}", "keyPrefix": "images", "distributionDomainName": "https://images.${DomainName}" } }' &&
+                cat config.production.json | jq --argjson storage "$storage_config" '. + {storage: $storage}' > config.production.json2; mv -f config.production.json{2,}
             08_start_ghost:
               command: !Join
                 - ''
@@ -211,6 +213,22 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
         - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+      Policies:
+        -
+          PolicyName: !Ref AWS::StackName
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketName}/*
+                  - !Sub arn:aws:s3:::${BucketName}
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
