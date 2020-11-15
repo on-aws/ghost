@@ -86,11 +86,11 @@ Resources:
           AcmCertificateArn: !Ref SslCert
           MinimumProtocolVersion: TLSv1.2_2018
           SslSupportMethod: sni-only
-        Tags:
-          - Key: App
-            Value: !Ref Tag
-          - Key: Name
-            Value: !Ref Tag
+      Tags:
+        - Key: App
+          Value: !Ref Tag
+        - Key: Name
+          Value: !Ref Tag
 
   DnsRecord:
     Type: AWS::Route53::RecordSet
