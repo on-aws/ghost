@@ -55,6 +55,12 @@ Resources:
   # #################################
   # CDN for your publication's images
   # #################################
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: Origin Access Identity allows CloudFront Distribution to read data from S3 Bucket
+
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -81,6 +87,8 @@ Resources:
           - Id: images
             DomainName: velaskec.com.s3.amazonaws.com
             OriginPath: images
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
         PriceClass: PriceClass_All
         ViewerCertificate:
           AcmCertificateArn: !Ref SslCert
