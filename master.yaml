@@ -34,6 +34,14 @@ Resources:
       Id: !Ref HostedZoneId
 
   # ####################
+  # HELPERS
+  # ####################
+  INVALIDATOR:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatesBucket}/helpers/cloudfront/invalidate-on-s3-event.yaml
+
+  # ####################
   # Ssl Certificate
   # ####################
   SslCert:
@@ -55,11 +63,41 @@ Resources:
   # #################################
   # CDN for your publication's images
   # #################################
+  OriginBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Queue: !GetAtt INVALIDATOR.Outputs.Queue
+            Event: s3:ObjectCreated:*
+          - Queue: !GetAtt INVALIDATOR.Outputs.Queue
+            Event: s3:ObjectRemoved:*
+
   OriginAccessIdentity:
     Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
     Properties:
       CloudFrontOriginAccessIdentityConfig:
         Comment: Origin Access Identity allows CloudFront Distribution to read data from S3 Bucket
+
+  OriginBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OriginBucket
+      PolicyDocument:
+        Statement:
+          -
+            Action:
+              - s3:GetObject
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OriginAccessIdentity}
+            Resource: !Sub arn:aws:s3:::${OriginBucket}/*
 
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
@@ -85,14 +123,14 @@ Resources:
         HttpVersion: http2
         Origins:
           - Id: images
-            DomainName: velaskec.com.s3.amazonaws.com
-            OriginPath: images
+            DomainName: !GetAtt OriginBucket.DomainName
+            OriginPath: /images
             S3OriginConfig:
               OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${OriginAccessIdentity}
         PriceClass: PriceClass_All
         ViewerCertificate:
           AcmCertificateArn: !Ref SslCert
-          MinimumProtocolVersion: TLSv1.2_2018
+          MinimumProtocolVersion: TLSv1.2_2019
           SslSupportMethod: sni-only
       Tags:
         - Key: App
