@@ -16,6 +16,24 @@ Parameters:
     Type: String
     Default: on-aws-us-east-1-master
 
+  SMTPServer:
+    Description: SMTP Server Name
+    Type: String
+    Default: email-smtp.us-east-1.amazonaws.com
+
+  MailUser:
+    Description: SMTP username
+    Type: String
+
+  MailPass:
+    Description: SMTP password
+    Type: String
+    NoEcho: true
+
+  MailFromAddress:
+    Description: Mail sent from
+    Type: String
+
 Resources:
   # ####################
   # CFN CUSTOM RESOURCES

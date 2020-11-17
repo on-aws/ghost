@@ -63,6 +63,23 @@ Parameters:
     Description: Amazon S3 Bucket to store your media files
     Type: String
 
+  SMTPServer:
+    Description: SMTP Server Name
+    Type: String
+
+  MailUser:
+    Description: SMTP username
+    Type: String
+
+  MailPass:
+    Description: SMTP password
+    Type: String
+    NoEcho: true
+
+  MailFromAddress:
+    Description: Mail sent from
+    Type: String
+
 Resources:
   HttpTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -187,7 +204,9 @@ Resources:
                 ghost config set server.host 0.0.0.0 &&
                 cat config.production.json | jq '.database.connection += {ssl: true}' > config.production.json2; mv -f config.production.json{2,} &&
                 storage_config='{ "active": "on-aws-ghost-storage", "on-aws-ghost-storage": { "bucketName": "${BucketName}", "keyPrefix": "images", "distributionDomainName": "https://images.${DomainName}" } }' &&
-                cat config.production.json | jq --argjson storage "$storage_config" '. + {storage: $storage}' > config.production.json2; mv -f config.production.json{2,}
+                cat config.production.json | jq --argjson storage "$storage_config" '. + {storage: $storage}' > config.production.json2; mv -f config.production.json{2,} &&
+                mail_config='{ "from": "${MailFromAddress}", "transport": "SMTP", "options": { "host": "${SMTPServer}", "port": 465, "service": "SES", "auth": { "user": "${MailUser}", "pass": "${MailPass}" } } }' &&
+                cat config.production.json | jq --argjson mail "$mail_config" '. + {mail: $mail}' > config.production.json2; mv -f config.production.json{2,}
             08_start_ghost:
               command: !Join
                 - ''
