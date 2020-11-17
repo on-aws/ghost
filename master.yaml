@@ -204,3 +204,7 @@ Resources:
         HostedZoneId: !Ref HostedZoneId
         SslCert: !Ref SslCert
         BucketName: !Ref OriginBucket
+        SMTPServer: !Ref SMTPServer
+        MailUser: !Ref MailUser
+        MailPass: !Ref MailPass
+        MailFromAddress: !Ref MailFromAddress
